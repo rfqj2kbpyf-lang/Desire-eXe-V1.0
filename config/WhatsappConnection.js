@@ -14,9 +14,11 @@ const delay = ms => new Promise(res => setTimeout(res, ms));
 
 // File paths - consistent for Koyeb
 const AUTH_DIR = './auth_info';
+const AUTH_BACKUP_DIR = './auth_info_backup';
 const CONTACT_FILE = './Desire_contact.json';
 const CONFIG_FILE = './config.json';
 const BUG_LOG = './buglog.json';
+const PERFORMANCE_LOG = './performance.json';
 
 let contactList = [];
 let botStartTime = null;
@@ -26,6 +28,49 @@ let qrCodeImage = null;
 let pairingCode = null;
 let pairingPhoneNumber = null;
 let currentSock = null;
+let reconnectCount = 0;
+const MAX_RECONNECTS = 50;
+const BASE_RECONNECT_DELAY = 5000;
+
+// Enhanced configuration loader
+function loadConfig() {
+  const defaultConfig = {
+    AUTO_BLOCK_UNKNOWN: false,
+    OWNER_JID: process.env.OWNER_JID || '2347017747337@s.whatsapp.net',
+    MAX_MEDIA_SIZE: 15000000, // 15MB
+    RECONNECT_DELAY: 10000,
+    MAX_RECONNECT_ATTEMPTS: 5,
+    ENABLE_PAIRING_CODE: true,
+    ENABLE_BACKUP: true,
+    BACKUP_INTERVAL: 3600000 // 1 hour
+  };
+
+  try {
+    if (fs.existsSync(CONFIG_FILE)) {
+      const fileConfig = JSON.parse(fs.readFileSync(CONFIG_FILE));
+      
+      // Validate critical config values
+      if (fileConfig.OWNER_JID && !isValidJid(fileConfig.OWNER_JID)) {
+        console.warn('⚠️ Invalid OWNER_JID in config, using default');
+        delete fileConfig.OWNER_JID;
+      }
+      
+      return { ...defaultConfig, ...fileConfig };
+    }
+  } catch (e) {
+    console.error('❌ Failed to load config:', e);
+  }
+  
+  return defaultConfig;
+}
+
+function isValidJid(jid) {
+  return typeof jid === 'string' && (
+    jid.endsWith('@s.whatsapp.net') || 
+    jid.endsWith('@g.us') ||
+    jid.endsWith('@broadcast')
+  );
+}
 
 // Load contacts
 function loadContactsFromFile() {
@@ -47,6 +92,21 @@ function saveContactsToFile() {
     fs.writeFileSync(CONTACT_FILE, JSON.stringify(contactList, null, 2));
   } catch (e) {
     console.error('❌ Failed to save contacts:', e);
+  }
+}
+
+// Backup auth state
+function backupAuthState() {
+  try {
+    if (fs.existsSync(AUTH_DIR)) {
+      if (fs.existsSync(AUTH_BACKUP_DIR)) {
+        fs.rmSync(AUTH_BACKUP_DIR, { recursive: true });
+      }
+      fs.cpSync(AUTH_DIR, AUTH_BACKUP_DIR, { recursive: true });
+      console.log('✅ Auth state backed up successfully');
+    }
+  } catch (error) {
+    console.error('❌ Failed to backup auth state:', error);
   }
 }
 
@@ -76,23 +136,38 @@ function logBugIncident(jid, type, detail) {
   }
 }
 
-// Unwrap ephemeral/viewOnce messages
-function unwrapMessage(message) {
-  if (message?.ephemeralMessage?.message) {
-    return unwrapMessage(message.ephemeralMessage.message);
+// Performance logging
+function logPerformance(metric, value) {
+  try {
+    let logs = {};
+    if (fs.existsSync(PERFORMANCE_LOG)) {
+      logs = JSON.parse(fs.readFileSync(PERFORMANCE_LOG));
+    }
+    
+    if (!logs[metric]) logs[metric] = [];
+    logs[metric].push({
+      timestamp: new Date().toISOString(),
+      value: value
+    });
+    
+    // Keep only last 100 entries per metric
+    if (logs[metric].length > 100) {
+      logs[metric] = logs[metric].slice(-100);
+    }
+    
+    fs.writeFileSync(PERFORMANCE_LOG, JSON.stringify(logs, null, 2));
+  } catch (e) {
+    console.error('❌ Failed to save performance log:', e);
   }
-  if (message?.viewOnceMessage?.message) {
-    return unwrapMessage(message.viewOnceMessage.message);
-  }
-  return message;
 }
 
-// Bug detection helpers - FIXED VERSION
+// Enhanced bug detection
 function isDangerousText(msg) {
   const text = msg?.conversation || msg?.extendedTextMessage?.text || '';
   
   if (!text || text.trim().length === 0) return false;
   
+  // Remove emojis for better pattern detection
   const textWithoutEmojis = text
     .replace(/[\u{1F300}-\u{1F5FF}]/gu, '')
     .replace(/[\u{1F600}-\u{1F64F}]/gu, '')
@@ -127,6 +202,28 @@ function isSuspiciousMedia(msg, maxBytes) {
   const media = msg?.stickerMessage || msg?.imageMessage || msg?.videoMessage || msg?.audioMessage || msg?.documentMessage;
   const size = media?.fileLength || 0;
   return size > maxBytes;
+}
+
+// Rate limiting for pairing codes
+const pairingAttempts = new Map();
+const MAX_PAIRING_ATTEMPTS = 3;
+const ATTEMPT_WINDOW = 60000; // 1 minute
+
+function canRequestPairing(phoneNumber) {
+  const now = Date.now();
+  const attempts = pairingAttempts.get(phoneNumber) || [];
+  
+  // Clean old attempts
+  const recentAttempts = attempts.filter(time => now - time < ATTEMPT_WINDOW);
+  pairingAttempts.set(phoneNumber, recentAttempts);
+  
+  return recentAttempts.length < MAX_PAIRING_ATTEMPTS;
+}
+
+function recordPairingAttempt(phoneNumber) {
+  const attempts = pairingAttempts.get(phoneNumber) || [];
+  attempts.push(Date.now());
+  pairingAttempts.set(phoneNumber, attempts);
 }
 
 // Get participant action text
@@ -179,6 +276,17 @@ function getUptimeString() {
   return `${seconds}s`;
 }
 
+// Connection health monitoring
+async function checkConnectionHealth(sock) {
+  try {
+    await sock.sendPresenceUpdate('available');
+    return true;
+  } catch (error) {
+    console.error('❌ Connection health check failed:', error);
+    return false;
+  }
+}
+
 // Send connection notification to owner
 async function sendConnectionNotification(sock, config) {
   if (!config.OWNER_JID) {
@@ -197,6 +305,7 @@ async function sendConnectionNotification(sock, config) {
 ⏱️ *Uptime:* ${uptime}
 🔗 *Session:* ${sock.authState.creds.registered ? 'Authenticated' : 'Not Registered'}
 📱 *Platform:* ${sock.user?.platform || 'Unknown'}
+🔄 *Reconnects:* ${reconnectCount}
 
 The bot is now operational and listening for messages.`;
 
@@ -227,20 +336,27 @@ async function requestPairingCode(phoneNumber) {
     throw new Error('WhatsApp connection not initialized');
   }
 
+  // Validate phone number format
+  const formattedNumber = phoneNumber.replace(/\D/g, '');
+  if (!formattedNumber.match(/^\d{10,15}$/)) {
+    throw new Error('Invalid phone number format. Use 10-15 digits with country code');
+  }
+
+  // Check rate limiting
+  if (!canRequestPairing(formattedNumber)) {
+    throw new Error('Too many pairing attempts. Please wait before trying again.');
+  }
+
+  recordPairingAttempt(formattedNumber);
+
   try {
-    console.log(`📱 Requesting pairing code for: ${phoneNumber}`);
-    
-    // Format phone number properly (remove any non-digit characters)
-    const formattedNumber = phoneNumber.replace(/\D/g, '');
-    
-    // Request pairing code from WhatsApp using Baileys' built-in method
+    console.log(`📱 Requesting pairing code for: ${formattedNumber}`);
     const code = await currentSock.requestPairingCode(formattedNumber);
     
     console.log(`✅ Pairing code received: ${code}`);
-    
     pairingPhoneNumber = formattedNumber;
     pairingCode = code;
-    
+
     // Auto-clear pairing code after 2 minutes
     setTimeout(() => {
       if (pairingCode === code) {
@@ -249,11 +365,19 @@ async function requestPairingCode(phoneNumber) {
         pairingPhoneNumber = null;
       }
     }, 120000);
-    
+
     return code;
   } catch (error) {
     console.error('❌ Failed to get pairing code:', error);
-    throw new Error(`Failed to get pairing code: ${error.message}`);
+    
+    // Provide more user-friendly error messages
+    if (error.message.includes('rate limit')) {
+      throw new Error('Too many attempts. Please wait before requesting another code.');
+    } else if (error.message.includes('invalid')) {
+      throw new Error('Invalid phone number. Please check the format.');
+    } else {
+      throw new Error(`Failed to get pairing code: ${error.message}`);
+    }
   }
 }
 
@@ -264,7 +388,22 @@ function clearPairingCode() {
   console.log('🧹 Pairing code cleared');
 }
 
-// QR Code HTML page (QR only, no pairing tab)
+// Cleanup socket listeners
+function cleanupSocket(sock) {
+  if (sock) {
+    try {
+      sock.ev.removeAllListeners('connection.update');
+      sock.ev.removeAllListeners('messages.upsert');
+      sock.ev.removeAllListeners('group-participants.update');
+      sock.ev.removeAllListeners('creds.update');
+    } catch (error) {
+      console.error('❌ Error cleaning up socket:', error);
+    }
+  }
+  currentSock = null;
+}
+
+// Enhanced QR Code HTML page
 function getQRPage() {
   return `
 <!DOCTYPE html>
@@ -455,412 +594,468 @@ function getQRPage() {
   `;
 }
 
-// Main bot with pairing code support
+// Main bot with enhanced features
 async function startBot() {
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-  let sock;
-
-  // Set bot start time
-  botStartTime = Date.now();
-
-  // Load config for owner JID - with environment variable fallback
-  let config = {
-    AUTO_BLOCK_UNKNOWN: false,
-    OWNER_JID: process.env.OWNER_JID || '2347017747337@s.whatsapp.net',
-    MAX_MEDIA_SIZE: 1500000
-  };
-
+  const config = loadConfig();
+  
   try {
-    if (fs.existsSync(CONFIG_FILE)) {
-      const fileConfig = JSON.parse(fs.readFileSync(CONFIG_FILE));
-      config = { ...config, ...fileConfig };
+    const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+    let sock;
+
+    // Set bot start time
+    botStartTime = Date.now();
+
+    // Backup auth state if enabled
+    if (config.ENABLE_BACKUP) {
+      backupAuthState();
     }
-  } catch (e) {
-    console.error('❌ Failed to load config:', e);
-  }
 
-  try {
-    sock = makeWASocket({
-      auth: state,
-      logger: P({ level: 'warn' }),
+    try {
+      sock = makeWASocket({
+        auth: state,
+        logger: P({ level: 'warn' }),
+        
+        // Enhanced connection options
+        browser: ["Ubuntu", "Chrome", "120.0.0.0"],
+        connectTimeoutMs: 60000,
+        keepAliveIntervalMs: 30000,
+        defaultQueryTimeoutMs: 60000,
+        retryRequestDelayMs: 1000,
+        maxRetries: 5,
+        
+        // Pairing code support
+        generateHighQualityLinkPreview: false,
+        patchMessageBeforeSending: (message) => {
+          const requiresPatch = !!(
+            message.buttonsMessage ||
+            message.templateMessage ||
+            message.listMessage
+          );
+          return requiresPatch;
+        },
+        
+        emitOwnEvents: true,
+        shouldIgnoreJid: jid => {
+          return typeof jid === 'string' && (
+            jid.endsWith('@bot') || 
+            isNewsletterJid(jid)
+          );
+        },
+        markOnlineOnConnect: true,
+        syncFullHistory: false,
+        linkPreviewImageThumbnailWidth: 200,
+        getMessage: async (key) => {
+          console.warn('⚠️ getMessage called for unknown message:', key.id);
+          return null;
+        }
+      });
+
+      // Store the socket globally for pairing code requests
+      currentSock = sock;
+
+    } catch (err) {
+      console.error('❌ Failed to initialize socket:', err);
+      throw err;
+    }
+
+    sock.ev.on('creds.update', saveCreds);
+
+    // Enhanced connection update handler
+    sock.ev.on('connection.update', async (update) => {
+      const { connection, lastDisconnect, qr } = update;
       
-      // Enable pairing code
-      generateHighQualityLinkPreview: false,
-      patchMessageBeforeSending: (message) => {
-        const requiresPatch = !!(
-          message.buttonsMessage ||
-          message.templateMessage ||
-          message.listMessage
-        );
-        return requiresPatch;
-      },
-      
-      // Connection options
-      browser: ["Ubuntu", "Chrome", "120.0.0.0"],
-      connectTimeoutMs: 60000,
-      keepAliveIntervalMs: 30000,
-      defaultQueryTimeoutMs: 60000,
-      retryRequestDelayMs: 1000,
-      maxRetries: 5,
-      
-      emitOwnEvents: true,
-      shouldIgnoreJid: jid => {
-        return typeof jid === 'string' && (
-          jid.endsWith('@bot') || 
-          isNewsletterJid(jid)
-        );
-      },
-      markOnlineOnConnect: true,
-      syncFullHistory: false,
-      linkPreviewImageThumbnailWidth: 200,
-      getMessage: async (key) => {
-        console.warn('⚠️ getMessage called for unknown message:', key.id);
-        return null;
+      // Handle QR Code
+      if (qr) {
+        console.log('📱 QR Code received - generating web QR...');
+        qrCode = qr;
+        qrCodeImage = await generateQRImage(qr);
+        global.botStatus = 'qr_pending';
+        isConnected = false;
+        clearPairingCode(); // Clear any existing pairing code when QR is generated
+        
+        console.log('🌐 QR Code available at web interface');
+        
+        // Auto-clear QR after 2 minutes
+        setTimeout(() => {
+          if (!isConnected && qrCode === qr) {
+            console.log('⏰ QR Code expired');
+            qrCode = null;
+            qrCodeImage = null;
+          }
+        }, 120000);
+      }
+
+      if (connection === 'close') {
+        const code = lastDisconnect?.error?.output?.statusCode;
+        const errorMessage = lastDisconnect?.error?.message;
+        
+        console.log('🔌 Connection closed, code:', code, 'Error:', errorMessage);
+        isConnected = false;
+        qrCode = null;
+        qrCodeImage = null;
+        clearPairingCode();
+        
+        cleanupSocket(sock);
+        
+        // Enhanced reconnection logic with exponential backoff
+        if (code === 428 || errorMessage?.includes('Connection Terminated')) {
+          console.log('🔄 WhatsApp terminated connection - auto-reconnecting...');
+          global.botStatus = 'reconnecting';
+        }
+        else if (code !== DisconnectReason.loggedOut) {
+          console.log('⚠️ Connection closed - reconnecting...');
+          global.botStatus = 'reconnecting';
+        } else {
+          console.log('🔒 Bot logged out - authentication required');
+          global.botStatus = 'needs_auth';
+          return;
+        }
+        
+        // Exponential backoff with max limit
+        const delay = Math.min(BASE_RECONNECT_DELAY * Math.pow(1.5, reconnectCount), 300000); // Max 5 minutes
+        reconnectCount++;
+        
+        console.log(`🔄 Auto-reconnecting in ${delay/1000}s (attempt ${reconnectCount}/${MAX_RECONNECTS})`);
+        
+        if (reconnectCount >= MAX_RECONNECTS) {
+          console.error('🚨 Max reconnection attempts reached. Restarting count.');
+          reconnectCount = 0;
+        }
+        
+        setTimeout(startBot, delay);
+      }
+
+      if (connection === 'open') {
+        console.log('✅ Desire-eXe V1.0 Is Online!');
+        isConnected = true;
+        qrCode = null;
+        qrCodeImage = null;
+        clearPairingCode();
+        reconnectCount = 0; // Reset reconnection counter
+        global.botStatus = 'connected';
+        global.connectionTime = new Date().toISOString();
+        
+        await sock.sendPresenceUpdate('available');
+        await restoreActivePresence(sock);
+        
+        // Log performance
+        logPerformance('connection_success', {
+          timestamp: new Date().toISOString(),
+          reconnectCount: reconnectCount
+        });
+        
+        await sendConnectionNotification(sock, config);
+      }
+
+      if (connection === 'connecting') {
+        console.log('🔄 Connecting to WhatsApp...');
+        isConnected = false;
+        global.botStatus = 'connecting';
       }
     });
 
-    // Store the socket globally for pairing code requests
-    currentSock = sock;
+    loadContactsFromFile();
 
-  } catch (err) {
-    console.error('❌ Failed to initialize socket:', err);
-    setTimeout(startBot, 10000);
-    return;
-  }
+    // Remove old listeners
+    sock.ev.removeAllListeners('messages.upsert');
+    sock.ev.removeAllListeners('group-participants.update');
 
-  sock.ev.on('creds.update', saveCreds);
-
-  // Connection update handler
-  sock.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect, qr } = update;
-    
-    // Handle QR Code
-    if (qr) {
-      console.log('📱 QR Code received - generating web QR...');
-      qrCode = qr;
-      qrCodeImage = await generateQRImage(qr);
-      global.botStatus = 'qr_pending';
-      isConnected = false;
-      clearPairingCode(); // Clear any existing pairing code when QR is generated
+    // Enhanced message handler
+    sock.ev.on('messages.upsert', async ({ messages }) => {
+      if (!isConnected) return;
       
-      console.log('🌐 QR Code available at web interface');
-      
-      // Auto-clear QR after 2 minutes
-      setTimeout(() => {
-        if (!isConnected && qrCode === qr) {
-          console.log('⏰ QR Code expired');
-          qrCode = null;
-          qrCodeImage = null;
-        }
-      }, 120000);
-    }
+      await delay(100);
+      let msg;
 
-    if (connection === 'close') {
-      const code = lastDisconnect?.error?.output?.statusCode;
-      const errorMessage = lastDisconnect?.error?.message;
-      
-      console.log('🔌 Connection closed, code:', code, 'Error:', errorMessage);
-      isConnected = false;
-      qrCode = null;
-      qrCodeImage = null;
-      clearPairingCode();
-      
-      if (code === 428 || errorMessage?.includes('Connection Terminated')) {
-        console.log('🔄 WhatsApp terminated connection - auto-reconnecting in 10s...');
-        global.botStatus = 'reconnecting';
-        setTimeout(startBot, 10000);
-      }
-      else if (code !== DisconnectReason.loggedOut) {
-        console.log('⚠️ Connection closed - reconnecting in 10s...');
-        global.botStatus = 'reconnecting';
-        setTimeout(startBot, 10000);
-      } else {
-        console.log('🔒 Bot logged out - authentication required');
-        global.botStatus = 'needs_auth';
-      }
-    }
-
-    if (connection === 'open') {
-      console.log('✅ Desire-eXe V1.0 Is Online!');
-      isConnected = true;
-      qrCode = null;
-      qrCodeImage = null;
-      clearPairingCode();
-      global.botStatus = 'connected';
-      global.connectionTime = new Date().toISOString();
-      
-      await sock.sendPresenceUpdate('available');
-      await restoreActivePresence(sock);
-      
-      await sendConnectionNotification(sock, config);
-    }
-
-    if (connection === 'connecting') {
-      console.log('🔄 Connecting to WhatsApp...');
-      isConnected = false;
-      global.botStatus = 'connecting';
-    }
-  });
-
-  loadContactsFromFile();
-
-  // Remove old listeners
-  sock.ev.removeAllListeners('messages.upsert');
-  sock.ev.removeAllListeners('group-participants.update');
-
-  // Message handler (only when connected)
-  sock.ev.on('messages.upsert', async ({ messages }) => {
-    if (!isConnected) return;
-    
-    await delay(100);
-    let msg;
-
-    try {
-      msg = messages[0];
-      const jid = msg.key.remoteJid;
-      
-      if (isNewsletterJid(jid)) {
-        console.log('📰 Ignoring newsletter/channel message from:', jid);
-        return;
-      }
-      
-      if (!msg.message || jid === 'status@broadcast' || jid.endsWith('@bot')) return;
-
-      msg.message = unwrapMessage(msg.message);
-
-      if (isGroupStatusMentionMessage(msg.message)) {
-        console.log('🔔 Group mention detected:', jid);
+      try {
+        msg = messages[0];
+        const jid = msg.key.remoteJid;
         
-        const configFile = './src/antimention.json';
-        if (fs.existsSync(configFile)) {
-          const config = JSON.parse(fs.readFileSync(configFile));
-          
-          if (config[jid]?.enabled) {
-            const mentionInfo = extractMentionInfo(msg.message);
-            const mentionUser = msg.key.participant || msg.key.remoteJid;
-            
-            try {
-              await sock.sendMessage(jid, {
-                delete: msg.key
-              });
-              console.log(`🗑️ Deleted mention message from ${mentionUser} in ${jid}`);
-            } catch (deleteError) {
-              console.error('❌ Failed to delete mention message:', deleteError);
-            }
-            
-            await sock.sendMessage(jid, {
-              text: `⚠️ *Mention Warning!*\n\n@${mentionUser.split('@')[0]} Please avoid mentioning everyone in the group.\n\n🚫 Mass mentions are not allowed and will be deleted automatically.`,
-              mentions: [mentionUser]
-            });
-
-            logBugIncident(jid, 'group_mention', `User ${mentionUser} mentioned everyone - MESSAGE DELETED`);
-            return;
-          }
-        }
-      }
-
-      if (!jid.endsWith('@g.us') && !jid.endsWith('@broadcast') && !isNewsletterJid(jid)) {
-        if (isDangerousText(msg.message)) {
-          console.warn(`🚨 Bug-like TEXT from ${jid}`);
-          await sock.sendMessage(jid, { text: '⚠️' });
-          await sock.updateBlockStatus(jid, 'block');
-          logBugIncident(jid, 'text', JSON.stringify(msg.message).slice(0, 500));
-          if (config.OWNER_JID) {
-            await sock.sendMessage(config.OWNER_JID, {
-              text: `🚨 Bug alert\nFrom: ${jid}\nType: Text\nAction: Blocked`
-            });
-          }
+        if (isNewsletterJid(jid)) {
+          console.log('📰 Ignoring newsletter/channel message from:', jid);
           return;
         }
-      }
-
-      if (jid && !jid.endsWith('@g.us') && !isNewsletterJid(jid)) {
-        const known = contactList.find(c => c.jid === jid);
-        if (!known) {
-          if (config.AUTO_BLOCK_UNKNOWN) {
-            console.log(`🚫 Unknown contact blocked: ${jid}`);
-            await sock.updateBlockStatus(jid, 'block');
-            return;
-          }
-          const name = msg.pushName || 'Unknown';
-          contactList.push({ jid, name, firstSeen: new Date().toISOString() });
-          saveContactsToFile();
-          console.log(`➕ Saved: ${name} (${jid})`);
-        }
-      }
-
-      console.log('📩 Message:', msg.message);
-      await MessageHandler(sock, messages, contactList);
-    } catch (err) {
-      console.error('❌ Message handler error:', err);
-      if (msg) await sock.sendMessageAck(msg.key);
-    }
-  });
-
-  // Group participants update handler (only when connected)
-  sock.ev.on('group-participants.update', async ({ id, participants, action }) => {
-    if (!isConnected) return;
-    
-    if (isNewsletterJid(id)) {
-      console.log('📰 Ignoring newsletter/channel participant update:', id);
-      return;
-    }
-    
-    console.log(`👥 Group update in ${id}: ${action} - ${participants.join(', ')}`);
-    
-    const now = new Date();
-    const date = now.toLocaleDateString('en-GB').replace(/\//g, '-');
-    const time = now.toLocaleTimeString('en-US', { hour12: false });
-    
-    if (action === 'promote' || action === 'demote') {
-      try {
-        const configFile = action === 'promote' ? './src/promote.json' : './src/demote.json';
         
-        if (fs.existsSync(configFile)) {
-          const configData = JSON.parse(fs.readFileSync(configFile));
+        if (!msg.message || jid === 'status@broadcast' || jid.endsWith('@bot')) return;
+
+        msg.message = unwrapMessage(msg.message);
+
+        if (isGroupStatusMentionMessage(msg.message)) {
+          console.log('🔔 Group mention detected:', jid);
           
-          if (configData[id]?.enabled) {
-            const customMessage = configData[id]?.message || 
-              (action === 'promote' ? "👑 @user has been promoted to admin!" : "🔻 @user has been demoted from admin!");
+          const configFile = './src/antimention.json';
+          if (fs.existsSync(configFile)) {
+            const config = JSON.parse(fs.readFileSync(configFile));
             
-            for (const user of participants) {
-              const userMessage = customMessage.replace(/@user/g, `@${user.split('@')[0]}`);
-              const messageText = `${userMessage}\n🕒 ${time}, ${date}`;
+            if (config[jid]?.enabled) {
+              const mentionInfo = extractMentionInfo(msg.message);
+              const mentionUser = msg.key.participant || msg.key.remoteJid;
               
-              await sock.sendMessage(id, {
-                text: messageText,
-                mentions: [user]
+              try {
+                await sock.sendMessage(jid, {
+                  delete: msg.key
+                });
+                console.log(`🗑️ Deleted mention message from ${mentionUser} in ${jid}`);
+              } catch (deleteError) {
+                console.error('❌ Failed to delete mention message:', deleteError);
+              }
+              
+              await sock.sendMessage(jid, {
+                text: `⚠️ *Mention Warning!*\n\n@${mentionUser.split('@')[0]} Please avoid mentioning everyone in the group.\n\n🚫 Mass mentions are not allowed and will be deleted automatically.`,
+                mentions: [mentionUser]
+              });
+
+              logBugIncident(jid, 'group_mention', `User ${mentionUser} mentioned everyone - MESSAGE DELETED`);
+              return;
+            }
+          }
+        }
+
+        if (!jid.endsWith('@g.us') && !jid.endsWith('@broadcast') && !isNewsletterJid(jid)) {
+          if (isDangerousText(msg.message)) {
+            console.warn(`🚨 Bug-like TEXT from ${jid}`);
+            await sock.sendMessage(jid, { text: '⚠️' });
+            await sock.updateBlockStatus(jid, 'block');
+            logBugIncident(jid, 'text', JSON.stringify(msg.message).slice(0, 500));
+            if (config.OWNER_JID) {
+              await sock.sendMessage(config.OWNER_JID, {
+                text: `🚨 Bug alert\nFrom: ${jid}\nType: Text\nAction: Blocked`
               });
             }
-            
-            console.log(`✅ ${action} notification sent for ${participants.join(', ')} in ${id}`);
+            return;
           }
-        } else {
-          const actionText = action === 'promote' ? '👑 Promoted to Admin' : '🔻 Demoted from Admin';
-          const messageText = `*${actionText}*\n👤 User: ${getParticipantActionText(participants, action)}\n🕒 Time: ${time}, ${date}`;
+        }
+
+        if (jid && !jid.endsWith('@g.us') && !isNewsletterJid(jid)) {
+          const known = contactList.find(c => c.jid === jid);
+          if (!known) {
+            if (config.AUTO_BLOCK_UNKNOWN) {
+              console.log(`🚫 Unknown contact blocked: ${jid}`);
+              await sock.updateBlockStatus(jid, 'block');
+              return;
+            }
+            const name = msg.pushName || 'Unknown';
+            contactList.push({ jid, name, firstSeen: new Date().toISOString() });
+            saveContactsToFile();
+            console.log(`➕ Saved: ${name} (${jid})`);
+          }
+        }
+
+        console.log('📩 Message received from:', jid);
+        await MessageHandler(sock, messages, contactList);
+      } catch (err) {
+        console.error('❌ Message handler error:', err);
+        if (msg) await sock.sendMessageAck(msg.key);
+      }
+    });
+
+    // Enhanced group participants update handler
+    sock.ev.on('group-participants.update', async ({ id, participants, action }) => {
+      if (!isConnected) return;
+      
+      if (isNewsletterJid(id)) {
+        console.log('📰 Ignoring newsletter/channel participant update:', id);
+        return;
+      }
+      
+      console.log(`👥 Group update in ${id}: ${action} - ${participants.join(', ')}`);
+      
+      const now = new Date();
+      const date = now.toLocaleDateString('en-GB').replace(/\//g, '-');
+      const time = now.toLocaleTimeString('en-US', { hour12: false });
+      
+      if (action === 'promote' || action === 'demote') {
+        try {
+          const configFile = action === 'promote' ? './src/promote.json' : './src/demote.json';
           
-          await sock.sendMessage(id, {
-            text: messageText,
-            mentions: participants
-          });
+          if (fs.existsSync(configFile)) {
+            const configData = JSON.parse(fs.readFileSync(configFile));
+            
+            if (configData[id]?.enabled) {
+              const customMessage = configData[id]?.message || 
+                (action === 'promote' ? "👑 @user has been promoted to admin!" : "🔻 @user has been demoted from admin!");
+              
+              for (const user of participants) {
+                const userMessage = customMessage.replace(/@user/g, `@${user.split('@')[0]}`);
+                const messageText = `${userMessage}\n🕒 ${time}, ${date}`;
+                
+                await sock.sendMessage(id, {
+                  text: messageText,
+                  mentions: [user]
+                });
+              }
+              
+              console.log(`✅ ${action} notification sent for ${participants.join(', ')} in ${id}`);
+            }
+          } else {
+            const actionText = action === 'promote' ? '👑 Promoted to Admin' : '🔻 Demoted from Admin';
+            const messageText = `*${actionText}*\n👤 User: ${getParticipantActionText(participants, action)}\n🕒 Time: ${time}, ${date}`;
+            
+            await sock.sendMessage(id, {
+              text: messageText,
+              mentions: participants
+            });
+          }
+          
+        } catch (error) {
+          console.error(`❌ Error sending ${action} notification:`, error);
+        }
+        return;
+      }
+
+      // Welcome new members
+      if (action === 'add') {
+        const welcomeFile = './src/welcome.json';
+        if (!fs.existsSync(welcomeFile)) return;
+        
+        let welcomeData = {};
+        try {
+          welcomeData = JSON.parse(fs.readFileSync(welcomeFile));
+        } catch (e) {
+          console.error('❌ Failed to load welcome data:', e);
+          return;
         }
         
-      } catch (error) {
-        console.error(`❌ Error sending ${action} notification:`, error);
-      }
-      return;
-    }
+        if (!welcomeData[id]?.enabled) return;
 
-    // Welcome new members
-    if (action === 'add') {
-      const welcomeFile = './src/welcome.json';
-      if (!fs.existsSync(welcomeFile)) return;
-      
-      let welcomeData = {};
-      try {
-        welcomeData = JSON.parse(fs.readFileSync(welcomeFile));
-      } catch (e) {
-        console.error('❌ Failed to load welcome data:', e);
-        return;
-      }
-      
-      if (!welcomeData[id]?.enabled) return;
-
-      for (const user of participants) {
-        try {
-          const userJid = typeof user === 'string' ? user : user.id || user.jid;
-          
-          if (!userJid) {
-            console.log('⚠️ Could not extract JID from:', user);
-            continue;
-          }
-
-          let pfpUrl;
+        for (const user of participants) {
           try {
-            pfpUrl = await sock.profilePictureUrl(userJid, 'image');
-          } catch {
-            pfpUrl = 'https://i.imgur.com/1s6Qz8v.png';
-          }
+            const userJid = typeof user === 'string' ? user : user.id || user.jid;
+            
+            if (!userJid) {
+              console.log('⚠️ Could not extract JID from:', user);
+              continue;
+            }
 
-          const userDisplay = userJid.split('@')[0];
-          const welcomeText = (welcomeData[id]?.message || '👋 Welcome @user!')
-            .replace(/@user/g, `@${userDisplay}`);
+            let pfpUrl;
+            try {
+              pfpUrl = await sock.profilePictureUrl(userJid, 'image');
+            } catch {
+              pfpUrl = 'https://i.imgur.com/1s6Qz8v.png';
+            }
 
-          try {
-            await sock.sendMessage(id, {
-              ...(pfpUrl && { image: { url: pfpUrl } }),
-              caption: welcomeText,
-              mentions: [userJid]
-            });
-          } catch (e) {
-            await sock.sendMessage(id, {
-              text: welcomeText,
-              mentions: [userJid]
-            });
+            const userDisplay = userJid.split('@')[0];
+            const welcomeText = (welcomeData[id]?.message || '👋 Welcome @user!')
+              .replace(/@user/g, `@${userDisplay}`);
+
+            try {
+              await sock.sendMessage(id, {
+                ...(pfpUrl && { image: { url: pfpUrl } }),
+                caption: welcomeText,
+                mentions: [userJid]
+              });
+            } catch (e) {
+              await sock.sendMessage(id, {
+                text: welcomeText,
+                mentions: [userJid]
+              });
+            }
+          } catch (error) {
+            console.error('❌ Error processing welcome for user:', user, error);
           }
-        } catch (error) {
-          console.error('❌ Error processing welcome for user:', user, error);
         }
       }
+      
+      // Goodbye for removed members
+      if (action === 'remove') {
+        const settingsFile = './src/group_settings.json';
+        if (!fs.existsSync(settingsFile)) return;
+
+        let settings = {};
+        try {
+          settings = JSON.parse(fs.readFileSync(settingsFile));
+        } catch (e) {
+          console.error('❌ Failed to load group settings:', e);
+          return;
+        }
+        
+        if (!settings[id]?.goodbyeEnabled) return;
+
+        for (const user of participants) {
+          try {
+            const userJid = typeof user === 'string' ? user : user.id || user.jid;
+            if (!userJid) continue;
+
+            const userDisplay = userJid.split('@')[0];
+            const goodbyeText = `👋 Goodbye @${userDisplay}!\n⌚ Left at: ${time}, ${date}\nToo Bad We Won't Miss You! 💔`;
+
+            let pfpUrl;
+            try {
+              pfpUrl = await sock.profilePictureUrl(userJid, 'image');
+            } catch {
+              pfpUrl = 'https://i.imgur.com/1s6Qz8v.png';
+            }
+
+            try {
+              await sock.sendMessage(id, {
+                ...(pfpUrl && { image: { url: pfpUrl } }),
+                caption: goodbyeText,
+                mentions: [userJid]
+              });
+            } catch (e) {
+              await sock.sendMessage(id, {
+                text: goodbyeText,
+                mentions: [userJid]
+              });
+            }
+          } catch (error) {
+            console.error('❌ Error processing goodbye for user:', user, error);
+          }
+        }
+      }
+    });
+
+    // Periodic health checks
+    setInterval(async () => {
+      if (isConnected && sock) {
+        const isHealthy = await checkConnectionHealth(sock);
+        if (!isHealthy) {
+          console.log('🩺 Connection unhealthy, attempting reconnect...');
+          isConnected = false;
+          startBot();
+        }
+      }
+    }, 30000); // Check every 30 seconds
+
+    // Periodic backup if enabled
+    if (config.ENABLE_BACKUP) {
+      setInterval(backupAuthState, config.BACKUP_INTERVAL);
+    }
+
+    return sock;
+  } catch (err) {
+    console.error('❌ Failed to start bot:', err);
+    
+    // Enhanced error recovery with exponential backoff
+    const delay = Math.min(BASE_RECONNECT_DELAY * Math.pow(1.5, reconnectCount), 300000);
+    reconnectCount++;
+    
+    console.log(`🔄 Auto-restarting in ${delay/1000}s (attempt ${reconnectCount}/${MAX_RECONNECTS})`);
+    
+    if (reconnectCount >= MAX_RECONNECTS) {
+      console.error('🚨 Max restart attempts reached. Restarting count.');
+      reconnectCount = 0;
     }
     
-    // Goodbye for removed members
-    if (action === 'remove') {
-      const settingsFile = './src/group_settings.json';
-      if (!fs.existsSync(settingsFile)) return;
-
-      let settings = {};
-      try {
-        settings = JSON.parse(fs.readFileSync(settingsFile));
-      } catch (e) {
-        console.error('❌ Failed to load group settings:', e);
-        return;
-      }
-      
-      if (!settings[id]?.goodbyeEnabled) return;
-
-      for (const user of participants) {
-        try {
-          const userJid = typeof user === 'string' ? user : user.id || user.jid;
-          if (!userJid) continue;
-
-          const userDisplay = userJid.split('@')[0];
-          const goodbyeText = `👋 Goodbye @${userDisplay}!\n⌚ Left at: ${time}, ${date}\nToo Bad We Won't Miss You! 💔`;
-
-          let pfpUrl;
-          try {
-            pfpUrl = await sock.profilePictureUrl(userJid, 'image');
-          } catch {
-            pfpUrl = 'https://i.imgur.com/1s6Qz8v.png';
-          }
-
-          try {
-            await sock.sendMessage(id, {
-              ...(pfpUrl && { image: { url: pfpUrl } }),
-              caption: goodbyeText,
-              mentions: [userJid]
-            });
-          } catch (e) {
-            await sock.sendMessage(id, {
-              text: goodbyeText,
-              mentions: [userJid]
-            });
-          }
-        } catch (error) {
-          console.error('❌ Error processing goodbye for user:', user, error);
-        }
-      }
-    }
-  });
-
-  return sock;
+    setTimeout(startBot, delay);
+    return null;
+  }
 }
 
 // Export functions for use in app.js
 module.exports = { 
   startBot, 
   getQRPage, 
-  getQRCode: () => ({ qrCode, qrCodeImage, isConnected, pairingCode, pairingPhoneNumber }),
+  getQRCode: () => ({ 
+    qrCode, 
+    qrCodeImage, 
+    isConnected, 
+    pairingCode, 
+    pairingPhoneNumber,
+    reconnectCount,
+    uptime: getUptimeString()
+  }),
   requestPairingCode,
-  clearPairingCode
+  clearPairingCode,
+  getUptimeString
 };
