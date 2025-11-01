@@ -815,7 +815,7 @@ if (command === 'menu') {
         console.log('Message pushName:', msg.pushName);
         console.log('Bot user ID:', sock.user?.id);
         
-        let ownerName = "Desire Admin";
+        let ownerName = "Desire-eXe V1.0";
         
         // Try multiple methods to get WhatsApp name
         try {
@@ -828,7 +828,7 @@ if (command === 'menu') {
             console.log('Bot name:', botContact.name);
             console.log('Bot notify:', botContact.notify);
             
-            ownerName = botContact.name || botContact.notify || msg.pushName || "Desire Admin";
+            ownerName = botContact.name || botContact.notify || msg.pushName || "Desire-eXe V1.0";
             
         } catch (error) {
             console.log('Bot contact fetch failed:', error.message);
@@ -842,7 +842,7 @@ if (command === 'menu') {
                 console.log('Owner contact fetch failed:', error2.message);
                 
                 // Method 3: Use message sender's name
-                ownerName = msg.pushName || "Desire-eXe";
+                ownerName = msg.pushName || "Desire-eXe V1.0";
             }
         }
         
@@ -854,8 +854,8 @@ if (command === 'menu') {
             .replace(/\$\(uptime\)/g, getUptime())
             .replace(/\$\(RAM\)/g, getRAMUsage())
             .replace(/\$\(metadataname\)/g, ownerName)
-            .replace(/\$\{global\.prefix\}/g, config.prefix)
-            .replace(/\$\{prefix\}/g, config.prefix)
+            .replace(/\$\{global\.prefix\}/g, currentPrefix)
+            .replace(/\$\{prefix\}/g, currentPrefix)
             .replace(/\$\(powerPercentage\)/g, getPowerPercentage());
         
         console.log('Final caption preview:', caption.substring(0, 200));
@@ -7791,6 +7791,7 @@ if (command === 'antilink-status') {
 }
 
 module.exports = Message;
+
 
 
 
