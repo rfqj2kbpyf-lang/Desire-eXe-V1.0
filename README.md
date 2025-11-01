@@ -113,10 +113,10 @@
 ```bash
 # Clone repository
 git clone https://github.com/Desire-exe/Desire-eXe-V1.0
-cd Desire-eXe
+cd Desire-eXe V1.0 
 
 # Install dependencies
-npm install
+npm install --legacy-peer-deps
 
 # Start the bot
 node app.js
@@ -206,6 +206,7 @@ WHATSAPP_NUMBER=2347017747337
 </div>
 
 <a><img src='https://i.imgur.com/LyHic3i.gif'/></a><a><img src='https://i.imgur.com/LyHic3i.gif'/></a>
+
 
 
 
