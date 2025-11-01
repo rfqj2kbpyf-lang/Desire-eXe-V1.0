@@ -1,6 +1,6 @@
 
 
-# 🤖 Desire-eXe WhatsApp Bot v1.0
+# 🤖 Desire-eXe v1.0
 
 <div align="center">
 
@@ -170,7 +170,7 @@ WHATSAPP_NUMBER=2347017747337
 ### **Connect With Developer**
 
 <p align="center">
-<a href="https://wa.me/2347017747337"><img src="https://img.shields.io/badge/WhatsApp-25D366?style=for-the-badge&logo=whatsapp&logoColor=white" /></a>
+<a href="https://whatsapp.com/channel/0029Vb5qsDv9cDDa98iVoC2H"><img src="https://img.shields.io/badge/WhatsApp-25D366?style=for-the-badge&logo=whatsapp&logoColor=white" /></a>
 <a href="https://github.com/Desire-exe"><img src="https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white" /></a>
 <a href="mailto:Dannysmartkid@gmail.com"><img src="https://img.shields.io/badge/Email-D14836?style=for-the-badge&logo=gmail&logoColor=white" /></a>
 </p>
@@ -197,7 +197,7 @@ WHATSAPP_NUMBER=2347017747337
 
 <div align="center">
 
-## **💀 DESIRE-eXe - WHERE CHAOS MEETS CODE 💀**
+## **💀 Desire-eXe v1.0 - WHERE CHAOS MEETS CODE 💀**
 
 **Made with ❤️ and ☕ by Desire**
 
@@ -206,6 +206,7 @@ WHATSAPP_NUMBER=2347017747337
 </div>
 
 <a><img src='https://i.imgur.com/LyHic3i.gif'/></a><a><img src='https://i.imgur.com/LyHic3i.gif'/></a>
+
 
 
 
