@@ -188,8 +188,6 @@ WHATSAPP_NUMBER=234**********
 4. **Your bot stays online 24/7!** 🎯
 
 
-*Replace with your actual UptimeRobot monitor ID*
-
 <a><img src='https://i.imgur.com/LyHic3i.gif'/></a><a><img src='https://i.imgur.com/LyHic3i.gif'/></a>
 
 ## 📞 **SUPPORT & CONTACT**
@@ -239,3 +237,4 @@ WHATSAPP_NUMBER=234**********
 </p>
 
 <a><img src='https://i.imgur.com/LyHic3i.gif'/></a><a><img src='https://i.imgur.com/LyHic3i.gif'/></a>
+
