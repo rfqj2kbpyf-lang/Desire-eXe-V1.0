@@ -218,7 +218,7 @@ WHATSAPP_NUMBER=234**********
 ## 📊 **STATISTICS**
 
 #### `TOTAL PROFILE VIEWS`
-[![Visitors](https://api.visitorbadge.io/api/visitors?path=https://github.com/Desire-exe&label=PROFILE%20VIEWS&labelColor=%23555&countColor=%23263759)](https://github.com/Desire-exe)
+[![Visitors](https://api.visitorbadge.io/api/visitors?path=https://github.com/Desire-exe&label=PROFILE%20VIEWS&labelColor=%23555&countColor=%23263759)](https://eventual-rebekkah-25desire-99abe724.koyeb.app/status)
 
 <a><img src='https://i.imgur.com/LyHic3i.gif'/></a><a><img src='https://i.imgur.com/LyHic3i.gif'/></a>
 
@@ -239,4 +239,5 @@ WHATSAPP_NUMBER=234**********
 </p>
 
 <a><img src='https://i.imgur.com/LyHic3i.gif'/></a><a><img src='https://i.imgur.com/LyHic3i.gif'/></a>
+
 
