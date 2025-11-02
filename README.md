@@ -139,21 +139,24 @@ WHATSAPP_NUMBER=234**********
 ## 📱 **CONNECTION METHODS**
 
 ### **Method 1: QR Code (Recommended)**
-1. **After deployment**, visit: `/qr` on your app
-2. Scan the QR code with WhatsApp
-3. Bot connects automatically
+1. **After deployment**, visit: `/auth` on your app
+2. **Select QR Code tab** (default)
+3. **Scan the QR code** with WhatsApp
+4. **Bot connects automatically**
 
 ### **Method 2: Pairing Code**
-1. Visit: `/pairing` on your app
-2. Enter your phone number
-3. Get code and enter in WhatsApp
-4. Bot connects instantly
+1. **Visit**: `/auth` on your app
+2. **Select Pairing Code tab**
+3. **Enter your phone number** (with country code)
+4. **Get 6-digit code** and enter in WhatsApp
+5. **Bot connects instantly**
 
 <a><img src='https://i.imgur.com/LyHic3i.gif'/></a><a><img src='https://i.imgur.com/LyHic3i.gif'/></a>
 
 ## 🌐 **LIVE MONITORING**
 
 ### **Real-time Status Check**
+- **Authentication**: `/auth` (QR + Pairing Code)
 - **Status Page**: `/status`
 - **Health Check**: `/health`
 - **Session Info**: `/session`
@@ -161,9 +164,34 @@ WHATSAPP_NUMBER=234**********
 
 ### **Bot Status Indicators**
 - 🟢 **Online** - Bot is connected and ready
-- 🟡 **QR Pending** - Waiting for scan
+- 🟡 **QR Pending** - Waiting for QR scan
+- 🔵 **Pairing Pending** - Waiting for pairing code
 - 🔴 **Offline** - Bot disconnected
 - 🟣 **Starting** - Initializing connection
+- 🟠 **Reconnecting** - Auto-reconnecting to WhatsApp
+
+**Note**: All authentication methods are now available on the unified `/auth` page with a beautiful tabbed interface!
+
+<a><img src='https://i.imgur.com/LyHic3i.gif'/></a><a><img src='https://i.imgur.com/LyHic3i.gif'/></a>
+
+## 📈 **24/7 UPTIME MONITORING**
+
+### **Setup UptimeRobot for Permanent Online Status:**
+
+1. **Go to [UptimeRobot.com](https://uptimerobot.com)**
+2. **Add New Monitor:**
+   - **Monitor Type**: HTTP(s)
+   - **Friendly Name**: `Desire-eXe Bot`
+   - **URL**: `https://your-app-name.koyeb.app/ping`
+   - **Check Interval**: 5 minutes
+
+3. **Enable notifications** for instant alerts
+4. **Your bot stays online 24/7!** 🎯
+
+### **Current Status:**
+[![Uptime Robot status](https://img.shields.io/uptimerobot/status/m795447992-3a2be0fb9c9c1f2d5e1a6a45?label=24%2F7%20UPTIME&style=for-the-badge&color=red)](https://status.desire-exe.xyz)
+
+*Replace with your actual UptimeRobot monitor ID*
 
 <a><img src='https://i.imgur.com/LyHic3i.gif'/></a><a><img src='https://i.imgur.com/LyHic3i.gif'/></a>
 
@@ -214,5 +242,3 @@ WHATSAPP_NUMBER=234**********
 </p>
 
 <a><img src='https://i.imgur.com/LyHic3i.gif'/></a><a><img src='https://i.imgur.com/LyHic3i.gif'/></a>
-
-
