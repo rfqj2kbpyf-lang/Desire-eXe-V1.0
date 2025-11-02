@@ -187,8 +187,8 @@ WHATSAPP_NUMBER=234**********
 3. **Enable notifications** for instant alerts
 4. **Your bot stays online 24/7!** 🎯
 
-### **Current Status:**
-[![Uptime Robot status](https://img.shields.io/uptimerobot/status/m795447992-3a2be0fb9c9c1f2d5e1a6a45?label=24%2F7%20UPTIME&style=for-the-badge&color=red)](https://eventual-rebekkah-25desire-99abe724.koyeb.app/status)
+
+*Replace with your actual UptimeRobot monitor ID*
 
 <a><img src='https://i.imgur.com/LyHic3i.gif'/></a><a><img src='https://i.imgur.com/LyHic3i.gif'/></a>
 
@@ -215,9 +215,10 @@ WHATSAPP_NUMBER=234**********
 - May violate WhatsApp Terms of Service
 - Developer not responsible for account bans
 
-📊 STATISTICS
-TOTAL PROFILE VIEWS
-https://api.visitorbadge.io/api/visitors?path=https://github.com/Desire-exe&label=PROFILE%2520VIEWS&labelColor=%2523555&countColor=%2523263759
+## 📊 **STATISTICS**
+
+#### `TOTAL PROFILE VIEWS`
+[![Visitors](https://api.visitorbadge.io/api/visitors?path=https://github.com/Desire-exe&label=PROFILE%20VIEWS&labelColor=%23555&countColor=%23263759)](https://github.com/Desire-exe)
 
 <a><img src='https://i.imgur.com/LyHic3i.gif'/></a><a><img src='https://i.imgur.com/LyHic3i.gif'/></a>
 
@@ -238,6 +239,3 @@ https://api.visitorbadge.io/api/visitors?path=https://github.com/Desire-exe&labe
 </p>
 
 <a><img src='https://i.imgur.com/LyHic3i.gif'/></a><a><img src='https://i.imgur.com/LyHic3i.gif'/></a>
-
-
-
